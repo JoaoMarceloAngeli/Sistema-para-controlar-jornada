@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Controle de Jornada de Trabalho</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #ffffff;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --muted:          #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --accent:         #2a78d6;
+    --good:           #0ca30c;
+    --good-bg:        #e3f6e3;
+    --serious:        #ec835a;
+    --serious-bg:     #fdece3;
+    --track:          #e1e0d9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-2:      #212120;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted:          #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --accent:         #3987e5;
+      --good:           #0ca30c;
+      --good-bg:        #123312;
+      --serious:        #ec835a;
+      --serious-bg:     #3a241c;
+      --track:          #2c2c2a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 20px 64px;
+  }
+  header h1 {
+    font-size: 22px;
+    margin: 0 0 4px;
+  }
+  header p {
+    margin: 0 0 28px;
+    color: var(--text-secondary);
+    font-size: 14px;
+  }
+
+  .uploads {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+  @media (max-width: 720px) {
+    .uploads { grid-template-columns: 1fr; }
+  }
+
+  .upload-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .upload-card h2 {
+    font-size: 16px;
+    margin: 0 0 2px;
+  }
+  .upload-card .hint {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+
+  .dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1.5px dashed var(--gridline);
+    border-radius: 10px;
+    padding: 22px 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.dragover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  .dropzone input[type="file"] { display: none; }
+  .dz-text { font-size: 13px; color: var(--text-secondary); }
+  .dz-filename { font-size: 13px; font-weight: 600; color: var(--text-primary); word-break: break-all; }
+
+  .upload-status { min-height: 20px; margin-top: 10px; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .upload-status.error { color: var(--serious); font-family: ui-monospace, "Segoe UI Mono", monospace; font-size: 12px; }
+  .upload-status.ok { color: var(--good); }
+
+  .results-section { margin-top: 34px; }
+  .results-section h2 { font-size: 18px; margin: 0 0 12px; }
+
+  .filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .filter-row label { font-size: 13px; color: var(--text-secondary); }
+  .filter-row select {
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--gridline);
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    min-width: 220px;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 720px) {
+    .stat-row { grid-template-columns: 1fr 1fr; }
+  }
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-tile .stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-tile .stat-label { font-size: 12px; color: var(--muted); }
+  .stat-tile.good .stat-value { color: var(--good); }
+  .stat-tile.serious .stat-value { color: var(--serious); }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-1);
+  }
+  table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  thead th {
+    text-align: left;
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--gridline);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 10px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--gridline);
+    vertical-align: middle;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .bar-track {
+    width: 110px;
+    height: 6px;
+    border-radius: 4px;
+    background: var(--track);
+    overflow: hidden;
+  }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  .bar-fill.good { background: var(--good); }
+  .bar-fill.serious { background: var(--serious); }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .status-badge.good { color: var(--good); background: var(--good-bg); }
+  .status-badge.serious { color: var(--serious); background: var(--serious-bg); }
+
+  .note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .empty { color: var(--muted); font-size: 13px; }
+
+  .mapping-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+  .mapping-card h2 { font-size: 16px; margin: 0 0 2px; }
+  .mapping-card .hint { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+
+  .mapping-add {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .mapping-add input {
+    flex: 1 1 220px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--gridline);
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .mapping-add button {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mapping-add button:hover { opacity: 0.9; }
+
+  .mapping-remove {
+    border: none;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 4px 8px;
+  }
+  .mapping-remove:hover { color: var(--serious); }
+  .mapping-empty { color: var(--muted); font-size: 13px; padding: 10px 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Controle de Jornada de Trabalho</h1>
+    <p>Envie os relatórios de ponto de Goiânia e Mara Rosa para verificar o cumprimento da jornada mensal (escala 5x2, 8h/dia).</p>
+  </header>
+
+  <section class="uploads">
+    <div class="upload-card" data-unit="goiania">
+      <h2>Goiânia</h2>
+      <p class="hint">Relatório resumo de frequência (aba "Resumo")</p>
+      <label class="dropzone" id="dz-goiania">
+        <input type="file" id="file-goiania" accept=".xlsx,.xls" />
+        <span class="dz-text">Clique ou arraste o arquivo aqui</span>
+        <span class="dz-filename"></span>
+      </label>
+      <div class="upload-status" id="status-goiania" aria-live="polite"></div>
+    </div>
+
+    <div class="upload-card" data-unit="mararosa">
+      <h2>Mara Rosa</h2>
+      <p class="hint">Registros de ponto (colunas Nome, Data, Hora)</p>
+      <label class="dropzone" id="dz-mararosa">
+        <input type="file" id="file-mararosa" accept=".xlsx,.xls" />
+        <span class="dz-text">Clique ou arraste o arquivo aqui</span>
+        <span class="dz-filename"></span>
+      </label>
+      <div class="upload-status" id="status-mararosa" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section class="mapping-card">
+    <h2>Funcionários (nome completo)</h2>
+    <p class="hint">Os relatórios de ponto trazem apenas o primeiro nome (às vezes colado ou abreviado). Cadastre aqui a correspondência com o nome completo — fica salvo neste computador e é usado automaticamente nos relatórios.</p>
+    <div class="mapping-add">
+      <input id="map-key" placeholder='Como aparece no Excel (ex: AnaPaula)' />
+      <input id="map-value" placeholder="Nome completo (ex: Ana Paula Andrade Bandeira)" />
+      <button id="map-add-btn" type="button">Adicionar</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nome no Excel</th><th>Nome completo</th><th></th></tr></thead>
+        <tbody id="mapping-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="results-section" id="section-goiania" hidden>
+    <h2>Goiânia</h2>
+    <div id="results-goiania"></div>
+  </section>
+
+  <section class="results-section" id="section-mararosa" hidden>
+    <h2>Mara Rosa</h2>
+    <div id="results-mararosa"></div>
+  </section>
+</div>
+
+<script src="lib/xlsx.full.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  const EPS = 0.01; // hours tolerance for float comparisons
+
+  // ---------- helpers ----------
+
+  const ACCENT_MAP = {
+    "á": "a", "à": "a", "â": "a", "ã": "a", "ä": "a",
+    "é": "e", "è": "e", "ê": "e", "ë": "e",
+    "í": "i", "ì": "i", "î": "i", "ï": "i",
+    "ó": "o", "ò": "o", "ô": "o", "õ": "o", "ö": "o",
+    "ú": "u", "ù": "u", "û": "u", "ü": "u",
+    "ç": "c"
+  };
+
+  function normalize(s) {
+    return String(s == null ? "" : s)
+      .trim()
+      .toLowerCase()
+      .split("")
+      .map((ch) => ACCENT_MAP[ch] || ch)
+      .join("");
+  }
+
+  function toNumber(v) {
+    if (typeof v === "number") return v;
+    if (v == null || v === "") return 0;
+    const n = parseFloat(String(v).replace(",", "."));
+    return isNaN(n) ? 0 : n;
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  function formatHours(h) {
+    const sign = h < -EPS ? "-" : "";
+    const abs = Math.abs(h);
+    let hh = Math.floor(abs);
+    let mm = Math.round((abs - hh) * 60);
+    if (mm === 60) { hh += 1; mm = 0; }
+    return `${sign}${hh}h${String(mm).padStart(2, "0")}min`;
+  }
+
+  function businessDaysInMonth(year, month) {
+    const days = new Date(year, month, 0).getDate();
+    let count = 0;
+    for (let d = 1; d <= days; d++) {
+      const dow = new Date(year, month - 1, d).getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  }
+
+  function businessDayHours(year, month) {
+    return businessDaysInMonth(year, month) * 8;
+  }
+
+  function parseDateCell(v) {
+    if (v instanceof Date && !isNaN(v)) {
+      return { year: v.getFullYear(), month: v.getMonth() + 1, day: v.getDate() };
+    }
+    if (typeof v === "number" && typeof XLSX !== "undefined" && XLSX.SSF) {
+      const d = XLSX.SSF.parse_date_code(v);
+      if (d) return { year: d.y, month: d.m, day: d.d };
+    }
+    const s = String(v == null ? "" : v).trim();
+    let m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
+    if (m) return { day: +m[1], month: +m[2], year: +m[3] };
+    m = s.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})$/);
+    if (m) return { year: +m[1], month: +m[2], day: +m[3] };
+    return null;
+  }
+
+  function parseTimeCell(v) {
+    if (v instanceof Date && !isNaN(v)) {
+      return v.getHours() * 60 + v.getMinutes() + v.getSeconds() / 60;
+    }
+    if (typeof v === "number") {
+      const frac = v - Math.floor(v);
+      const totalSeconds = Math.round(frac * 24 * 3600);
+      return totalSeconds / 60;
+    }
+    const s = String(v == null ? "" : v).trim();
+    const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) return (+m[1]) * 60 + (+m[2]) + (m[3] ? (+m[3]) / 60 : 0);
+    return null;
+  }
+
+  function findHeaderCol(row, targetNormalized) {
+    return row.findIndex((v) => normalize(v) === targetNormalized);
+  }
+
+  function dumpRows(aoa, n) {
+    return aoa
+      .slice(0, n)
+      .map((row, i) => `Linha ${i + 1}: [${row.map((c) => String(c == null ? "" : c)).join(" | ")}]`)
+      .join("\n");
+  }
+
+  // ---------- name mapping (Excel first name -> full name) ----------
+
+  const MAPPING_STORAGE_KEY = "jornada_nome_mapping_v1";
+  const DEFAULT_MAPPING = [
+    { key: "Brithany", value: "Brithany Michelle Orozco Lopez" },
+    { key: "NaThan", value: "Nathan Cesar Araujo Prado" },
+    { key: "VERONICA", value: "Veronica Barbosa Lemos" },
+    { key: "AnaPaula", value: "Ana Paula Andrade Bandeira" },
+    { key: "Marina", value: "Marina de Oliveira Magalhães" },
+    { key: "feLipe", value: "Felipe Augusto Batista Martins" },
+    { key: "THAINARA C", value: "Thainara Cristina do Prado Pereira" },
+    { key: "CAROLINE", value: "Caroline Xavier Ribeiro" },
+    { key: "LARA", value: "Lara das Graças Lemos Silva" },
+    { key: "JOAO LUIZ", value: "João Luiz Alves de Souza" }
+  ];
+
+  function nameKey(s) {
+    return normalize(s).replace(/\s+/g, "");
+  }
+
+  function loadMapping() {
+    try {
+      const raw = localStorage.getItem(MAPPING_STORAGE_KEY);
+      if (raw === null) return DEFAULT_MAPPING.slice();
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return DEFAULT_MAPPING.slice();
+    }
+  }
+
+  function saveMapping(list) {
+    localStorage.setItem(MAPPING_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  let nameMapping = loadMapping();
+
+  function resolveFullName(rawName) {
+    const k = nameKey(rawName);
+    const entry = nameMapping.find((m) => nameKey(m.key) === k);
+    return entry ? entry.value : rawName;
+  }
+
+  // ---------- Goiânia parser (summary report, "Resumo" sheet) ----------
+
+  function parseGoiania(workbook) {
+    const sheetName =
+      workbook.SheetNames.find((n) => normalize(n) === "resumo") ||
+      workbook.SheetNames[0];
+    const ws = workbook.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+
+    if (!aoa.length) {
+      throw new Error(
+        `A aba "${sheetName}" está vazia. Abas encontradas no arquivo: ${workbook.SheetNames.join(", ")}.`
+      );
+    }
+
+    // find period (mês/ano) among the first rows
+    let period = null;
+    outer: for (let r = 0; r < Math.min(15, aoa.length); r++) {
+      for (let c = 0; c < aoa[r].length; c++) {
+        const val = aoa[r][c];
+        if (val instanceof Date && !isNaN(val)) {
+          period = { year: val.getFullYear(), month: val.getMonth() + 1 };
+          break outer;
+        }
+        const text = String(val == null ? "" : val);
+        const m = text.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+        if (m) {
+          period = { year: +m[1], month: +m[2] };
+          break outer;
+        }
+      }
+    }
+    if (!period) {
+      throw new Error(
+        `Não encontrei o período (mês/ano) nas primeiras linhas da planilha de Goiânia (aba "${sheetName}"). ` +
+        `Esperava algo como "2026/06/01 ~ 06/30". Conteúdo encontrado:\n\n${dumpRows(aoa, 10)}`
+      );
+    }
+
+    // find header row containing "Nome"
+    let headerRow = -1, nomeCol = -1;
+    for (let r = 0; r < Math.min(20, aoa.length); r++) {
+      const idx = findHeaderCol(aoa[r], "nome");
+      if (idx !== -1) { headerRow = r; nomeCol = idx; break; }
+    }
+    if (headerRow === -1) {
+      throw new Error(
+        `Não encontrei a coluna "Nome" na planilha de Goiânia (aba "${sheetName}"). Conteúdo encontrado:\n\n${dumpRows(aoa, 12)}`
+      );
+    }
+
+    const hdr = aoa[headerRow];
+    const departamentoCol = findHeaderCol(hdr, "departamento");
+
+    // "Real" (and other sub-headers like "Necessário") often sit on the row
+    // below "Nome"/"Departamento", under a merged group header (e.g. "Duração
+    // do trabalho"). Look on the header row first, then the row right below it.
+    let realCol = findHeaderCol(hdr, "real");
+    let dataStartRow = headerRow + 1;
+    if (realCol === -1 && aoa[headerRow + 1]) {
+      const subHdr = aoa[headerRow + 1];
+      const subIdx = findHeaderCol(subHdr, "real");
+      if (subIdx !== -1) {
+        realCol = subIdx;
+        dataStartRow = headerRow + 2;
+      }
+    }
+    if (realCol === -1) {
+      throw new Error(
+        `Não encontrei a coluna "Real" (horas trabalhadas) na planilha de Goiânia. ` +
+        `Cabeçalho encontrado na linha ${headerRow + 1}:\n[${hdr.join(" | ")}]\n` +
+        `Linha seguinte (${headerRow + 2}):\n[${(aoa[headerRow + 1] || []).join(" | ")}]`
+      );
+    }
+
+    const requiredHours = businessDayHours(period.year, period.month);
+    const employees = [];
+    for (let r = dataStartRow; r < aoa.length; r++) {
+      const row = aoa[r];
+      const nome = row[nomeCol];
+      if (!nome || String(nome).trim() === "") break;
+      employees.push({
+        nome: String(nome).trim(),
+        departamento: departamentoCol !== -1 ? String(row[departamentoCol] || "").trim() : "",
+        real: toNumber(row[realCol]),
+        necessario: requiredHours,
+        periodos: [period],
+        diasIncompletos: 0
+      });
+    }
+    if (!employees.length) {
+      throw new Error(
+        `Nenhum funcionário encontrado na planilha de Goiânia (a linha de dados ${dataStartRow + 1} veio em branco na coluna "Nome"). ` +
+        `Cabeçalho na linha ${headerRow + 1}:\n[${hdr.join(" | ")}]\nLinha ${dataStartRow + 1}: [${(aoa[dataStartRow] || []).join(" | ")}]`
+      );
+    }
+    return employees;
+  }
+
+  // ---------- Mara Rosa parser (raw punch records) ----------
+
+  function parseMaraRosa(workbook) {
+    if (!workbook.SheetNames.length) {
+      throw new Error("O arquivo de Mara Rosa não tem nenhuma aba/planilha.");
+    }
+
+    // scan every sheet, first ~15 rows, for a row that has both "Nome" and "Data" headers
+    let aoa = null, hdr = null, headerRow = -1, nomeCol = -1, dataCol = -1, sheetUsed = null;
+    outer: for (const sn of workbook.SheetNames) {
+      const ws = workbook.Sheets[sn];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+      for (let r = 0; r < Math.min(15, rows.length); r++) {
+        const nIdx = findHeaderCol(rows[r], "nome");
+        const dIdx = findHeaderCol(rows[r], "data");
+        if (nIdx !== -1 && dIdx !== -1) {
+          aoa = rows; hdr = rows[r]; headerRow = r; nomeCol = nIdx; dataCol = dIdx; sheetUsed = sn;
+          break outer;
+        }
+      }
+    }
+    if (!aoa) {
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const preview = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true, defval: "" });
+      throw new Error(
+        `Não encontrei as colunas "Nome" e "Data" em nenhuma das abas (${workbook.SheetNames.join(", ")}). ` +
+        `Conteúdo da primeira aba ("${workbook.SheetNames[0]}"):\n\n${dumpRows(preview, 10)}`
+      );
+    }
+
+    const departamentoCol = findHeaderCol(hdr, "departamento");
+    const horaCol = findHeaderCol(hdr, "hora");
+    if (horaCol === -1) {
+      throw new Error(
+        `Encontrei "Nome" e "Data" na aba "${sheetUsed}" (linha ${headerRow + 1}), mas não achei a coluna "Hora". Cabeçalho encontrado:\n[${hdr.join(" | ")}]`
+      );
+    }
+
+    const employees = new Map();
+    for (let r = headerRow + 1; r < aoa.length; r++) {
+      const row = aoa[r];
+      const nomeRaw = row[nomeCol];
+      if (!nomeRaw || String(nomeRaw).trim() === "") continue;
+      const nome = String(nomeRaw).trim();
+      const departamento = departamentoCol !== -1 ? String(row[departamentoCol] || "").trim() : "";
+
+      const dateInfo = parseDateCell(row[dataCol]);
+      const timeMinutes = parseTimeCell(row[horaCol]);
+      if (!dateInfo || timeMinutes == null) continue;
+
+      if (!employees.has(nome)) {
+        employees.set(nome, { nome, departamento, days: new Map(), months: new Set() });
+      }
+      const emp = employees.get(nome);
+      if (departamento && !emp.departamento) emp.departamento = departamento;
+
+      const dateKey = `${dateInfo.year}-${dateInfo.month}-${dateInfo.day}`;
+      emp.months.add(`${dateInfo.year}-${dateInfo.month}`);
+      if (!emp.days.has(dateKey)) {
+        emp.days.set(dateKey, { min: timeMinutes, max: timeMinutes, count: 1 });
+      } else {
+        const d = emp.days.get(dateKey);
+        d.min = Math.min(d.min, timeMinutes);
+        d.max = Math.max(d.max, timeMinutes);
+        d.count++;
+      }
+    }
+
+    const result = [];
+    for (const emp of employees.values()) {
+      let realMinutes = 0;
+      let incompleteDays = 0;
+      for (const d of emp.days.values()) {
+        if (d.count < 2) { incompleteDays++; continue; }
+        realMinutes += (d.max - d.min);
+      }
+      let requiredHours = 0;
+      const periodos = [];
+      for (const ym of emp.months) {
+        const [y, m] = ym.split("-").map(Number);
+        requiredHours += businessDayHours(y, m);
+        periodos.push({ year: y, month: m });
+      }
+      periodos.sort((a, b) => a.year - b.year || a.month - b.month);
+      result.push({
+        nome: emp.nome,
+        departamento: emp.departamento,
+        real: realMinutes / 60,
+        necessario: requiredHours,
+        periodos,
+        diasIncompletos: incompleteDays
+      });
+    }
+    if (!result.length) {
+      throw new Error(
+        `Encontrei o cabeçalho na aba "${sheetUsed}", mas nenhuma linha teve "Data" e "Hora" em formato reconhecido. ` +
+        `Cabeçalho: [${hdr.join(" | ")}]\nExemplo de linha de dados:\n${dumpRows(aoa.slice(headerRow + 1), 5)}`
+      );
+    }
+    result.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    return result;
+  }
+
+  // ---------- rendering ----------
+
+  function rowHtml(e) {
+    const diff = e.real - e.necessario;
+    const ratio = e.necessario > 0 ? (e.real / e.necessario) * 100 : 0;
+    const barWidth = Math.max(0, Math.min(100, ratio));
+    const met = diff >= -EPS;
+    const statusClass = met ? "good" : "serious";
+    const statusIcon = met ? "✓" : "⚠";
+    const statusText = met
+      ? (diff > EPS ? `Meta batida — crédito de ${formatHours(diff)} no banco de horas` : "Meta batida exatamente")
+      : `Faltam ${formatHours(-diff)} para bater a meta`;
+    const periodo = (e.periodos || []).map((p) => `${String(p.month).padStart(2, "0")}/${p.year}`).join(", ");
+    const incompleteNote = e.diasIncompletos
+      ? `<div class="note">⚠ ${e.diasIncompletos} dia(s) com apenas 1 batida (ignorado no cálculo)</div>`
+      : "";
+    const fullName = resolveFullName(e.nome);
+    const nameCell = fullName !== e.nome
+      ? `${escapeHtml(fullName)}<div class="note">Excel: ${escapeHtml(e.nome)}</div>`
+      : escapeHtml(e.nome);
+
+    return `<tr>
+      <td>${nameCell}</td>
+      <td>${escapeHtml(e.departamento || "—")}</td>
+      <td>${periodo || "—"}</td>
+      <td class="num">${formatHours(e.necessario)}</td>
+      <td class="num">${formatHours(e.real)}${incompleteNote}</td>
+      <td><div class="bar-track"><div class="bar-fill ${statusClass}" style="width:${barWidth}%"></div></div></td>
+      <td><span class="status-badge ${statusClass}">${statusIcon} ${statusText}</span></td>
+    </tr>`;
+  }
+
+  const filterState = {};
+
+  function renderResults(unit, employees) {
+    const section = document.getElementById("section-" + unit);
+    const container = document.getElementById("results-" + unit);
+    section.hidden = false;
+
+    const metCount = employees.filter((e) => e.real - e.necessario >= -EPS).length;
+    const totalCredit = employees.reduce((s, e) => s + Math.max(0, e.real - e.necessario), 0);
+    const totalDeficit = employees.reduce((s, e) => s + Math.max(0, e.necessario - e.real), 0);
+
+    const displayNames = Array.from(new Set(employees.map((e) => resolveFullName(e.nome))))
+      .sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const currentFilter = filterState[unit] || "";
+    const filtered = currentFilter
+      ? employees.filter((e) => resolveFullName(e.nome) === currentFilter)
+      : employees;
+
+    container.innerHTML = `
+      <div class="filter-row">
+        <label for="filter-${unit}">Funcionário:</label>
+        <select id="filter-${unit}">
+          <option value="">Todos (${employees.length})</option>
+          ${displayNames
+            .map((n) => `<option value="${escapeHtml(n)}"${n === currentFilter ? " selected" : ""}>${escapeHtml(n)}</option>`)
+            .join("")}
+        </select>
+      </div>
+      <div class="stat-row">
+        <div class="stat-tile"><span class="stat-value">${employees.length}</span><span class="stat-label">funcionários</span></div>
+        <div class="stat-tile"><span class="stat-value">${metCount}/${employees.length}</span><span class="stat-label">bateram a meta</span></div>
+        <div class="stat-tile good"><span class="stat-value">${formatHours(totalCredit)}</span><span class="stat-label">crédito total (banco de horas)</span></div>
+        <div class="stat-tile serious"><span class="stat-value">${formatHours(totalDeficit)}</span><span class="stat-label">déficit total</span></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th><th>Departamento</th><th>Período</th>
+              <th>Necessário</th><th>Trabalhado</th><th>Progresso</th><th>Situação</th>
+            </tr>
+          </thead>
+          <tbody>${filtered.map(rowHtml).join("")}</tbody>
+        </table>
+      </div>`;
+
+    document.getElementById(`filter-${unit}`).addEventListener("change", (e) => {
+      filterState[unit] = e.target.value;
+      renderResults(unit, lastEmployees[unit] || employees);
+    });
+  }
+
+  // ---------- mapping table UI ----------
+
+  const lastEmployees = {};
+
+  function renderMappingTable() {
+    const tbody = document.getElementById("mapping-tbody");
+    if (!nameMapping.length) {
+      tbody.innerHTML = `<tr><td colspan="3" class="mapping-empty">Nenhum funcionário cadastrado ainda.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = nameMapping
+      .map((m, i) => `<tr>
+        <td>${escapeHtml(m.key)}</td>
+        <td>${escapeHtml(m.value)}</td>
+        <td><button class="mapping-remove" type="button" data-idx="${i}" title="Remover">✕</button></td>
+      </tr>`)
+      .join("");
+    tbody.querySelectorAll(".mapping-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        nameMapping.splice(Number(btn.dataset.idx), 1);
+        saveMapping(nameMapping);
+        renderMappingTable();
+        rerenderCachedResults();
+      });
+    });
+  }
+
+  function rerenderCachedResults() {
+    Object.keys(lastEmployees).forEach((unit) => renderResults(unit, lastEmployees[unit]));
+  }
+
+  function setupMappingForm() {
+    const keyInput = document.getElementById("map-key");
+    const valueInput = document.getElementById("map-value");
+    const addBtn = document.getElementById("map-add-btn");
+
+    function addEntry() {
+      const key = keyInput.value.trim();
+      const value = valueInput.value.trim();
+      if (!key || !value) return;
+      const existing = nameMapping.findIndex((m) => nameKey(m.key) === nameKey(key));
+      if (existing !== -1) nameMapping[existing] = { key, value };
+      else nameMapping.push({ key, value });
+      saveMapping(nameMapping);
+      keyInput.value = "";
+      valueInput.value = "";
+      keyInput.focus();
+      renderMappingTable();
+      rerenderCachedResults();
+    }
+
+    addBtn.addEventListener("click", addEntry);
+    [keyInput, valueInput].forEach((input) =>
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") addEntry();
+      })
+    );
+  }
+
+  // ---------- upload wiring ----------
+
+  function setupUploadCard(unit, parseFn) {
+    const dz = document.getElementById("dz-" + unit);
+    const input = document.getElementById("file-" + unit);
+    const statusEl = document.getElementById("status-" + unit);
+    const filenameEl = dz.querySelector(".dz-filename");
+
+    function setError(msg) {
+      statusEl.textContent = msg;
+      statusEl.className = "upload-status error";
+    }
+    function setOk(msg) {
+      statusEl.textContent = msg;
+      statusEl.className = "upload-status ok";
+    }
+
+    function handleFile(file) {
+      if (!file) return;
+      filenameEl.textContent = file.name;
+      statusEl.textContent = "Processando…";
+      statusEl.className = "upload-status";
+
+      const reader = new FileReader();
+      reader.onerror = () => setError("Não foi possível ler o arquivo.");
+      reader.onload = (evt) => {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: "array", cellDates: true });
+          const employees = parseFn(workbook);
+          lastEmployees[unit] = employees;
+          renderResults(unit, employees);
+          setOk(`${employees.length} funcionário(s) processado(s).`);
+        } catch (err) {
+          setError(err && err.message ? err.message : "Erro ao processar o arquivo.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    input.addEventListener("change", () => handleFile(input.files[0]));
+
+    ["dragenter", "dragover"].forEach((evt) =>
+      dz.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dz.classList.add("dragover");
+      })
+    );
+    ["dragleave", "drop"].forEach((evt) =>
+      dz.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dz.classList.remove("dragover");
+      })
+    );
+    dz.addEventListener("drop", (e) => {
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+  }
+
+  renderMappingTable();
+  setupMappingForm();
+  setupUploadCard("goiania", parseGoiania);
+  setupUploadCard("mararosa", parseMaraRosa);
+})();
+</script>
+</body>
+</html>
