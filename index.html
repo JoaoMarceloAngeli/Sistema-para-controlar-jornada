@@ -218,8 +218,43 @@
     padding: 18px;
     margin-top: 16px;
   }
-  .mapping-card h2 { font-size: 16px; margin: 0 0 2px; }
+  .mapping-card h2 { font-size: 16px; margin: 0; }
   .mapping-card .hint { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+
+  .mapping-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .mapping-summary::-webkit-details-marker { display: none; }
+  .mapping-summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    font-size: 12px;
+    transition: transform .15s;
+  }
+  details[open] > .mapping-summary::before { transform: rotate(90deg); }
+  .mapping-body { margin-top: 14px; }
+
+  .export-row { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+  .export-row button {
+    padding: 9px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .export-row button:hover { border-color: var(--accent); color: var(--accent); }
+  .export-status { font-size: 13px; color: var(--muted); }
+  .export-status.error { color: var(--serious); }
+  .export-status.ok { color: var(--good); }
 
   .mapping-add {
     display: flex;
@@ -260,6 +295,18 @@
   }
   .mapping-remove:hover { color: var(--serious); }
   .mapping-empty { color: var(--muted); font-size: 13px; padding: 10px 12px; }
+
+  .mapping-hours {
+    width: 64px;
+    padding: 5px 7px;
+    border-radius: 6px;
+    border: 1px solid var(--gridline);
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .mapping-active { width: 16px; height: 16px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -272,7 +319,7 @@
   <section class="uploads">
     <div class="upload-card" data-unit="goiania">
       <h2>Goiânia</h2>
-      <p class="hint">Relatório resumo de frequência (aba "Resumo")</p>
+      <p class="hint">Registros de ponto (aba "Registros")</p>
       <label class="dropzone" id="dz-goiania">
         <input type="file" id="file-goiania" accept=".xlsx,.xls" />
         <span class="dz-text">Clique ou arraste o arquivo aqui</span>
@@ -293,20 +340,30 @@
     </div>
   </section>
 
+  <div class="export-row">
+    <button id="export-btn" type="button">Exportar relatório (Excel)</button>
+    <span id="export-status" class="export-status"></span>
+  </div>
+
   <section class="mapping-card">
-    <h2>Funcionários (nome completo)</h2>
-    <p class="hint">Os relatórios de ponto trazem apenas o primeiro nome (às vezes colado ou abreviado). Cadastre aqui a correspondência com o nome completo — fica salvo neste computador e é usado automaticamente nos relatórios.</p>
-    <div class="mapping-add">
-      <input id="map-key" placeholder='Como aparece no Excel (ex: AnaPaula)' />
-      <input id="map-value" placeholder="Nome completo (ex: Ana Paula Andrade Bandeira)" />
-      <button id="map-add-btn" type="button">Adicionar</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Nome no Excel</th><th>Nome completo</th><th></th></tr></thead>
-        <tbody id="mapping-tbody"></tbody>
-      </table>
-    </div>
+    <details id="mapping-details" open>
+      <summary class="mapping-summary"><h2>Funcionários (nome completo)</h2></summary>
+      <div class="mapping-body">
+        <p class="hint">Os relatórios de ponto trazem apenas o primeiro nome (às vezes colado ou abreviado). Cadastre aqui a correspondência com o nome completo — fica salvo neste computador e é usado automaticamente nos relatórios.</p>
+        <div class="mapping-add">
+          <input id="map-key" placeholder='Como aparece no Excel (ex: AnaPaula)' />
+          <input id="map-value" placeholder="Nome completo (ex: Ana Paula Andrade Bandeira)" />
+          <input id="map-hours" type="number" min="1" max="24" step="0.5" value="8" style="max-width: 90px;" title="Horas por dia" />
+          <button id="map-add-btn" type="button">Adicionar</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nome no Excel</th><th>Nome completo</th><th>Horas/dia</th><th>Incluir</th><th></th></tr></thead>
+            <tbody id="mapping-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </details>
   </section>
 
   <section class="results-section" id="section-goiania" hidden>
@@ -344,13 +401,6 @@
       .split("")
       .map((ch) => ACCENT_MAP[ch] || ch)
       .join("");
-  }
-
-  function toNumber(v) {
-    if (typeof v === "number") return v;
-    if (v == null || v === "") return 0;
-    const n = parseFloat(String(v).replace(",", "."));
-    return isNaN(n) ? 0 : n;
   }
 
   function escapeHtml(s) {
@@ -424,20 +474,87 @@
       .join("\n");
   }
 
+  // A day only counts if exactly 2 punches (one continuous shift) or 4 punches
+  // (morning + afternoon, lunch excluded) were recorded. Any other count
+  // (1, 3, 5, 6...) is unreliable and gets discarded.
+  function hoursFromPunches(times) {
+    const sorted = times.slice().sort((a, b) => a - b);
+    if (sorted.length === 2) return { minutes: sorted[1] - sorted[0], valid: true };
+    if (sorted.length === 4) return { minutes: (sorted[1] - sorted[0]) + (sorted[3] - sorted[2]), valid: true };
+    return { minutes: 0, valid: false };
+  }
+
+  function findPeriodInSheet(ws) {
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+    for (let r = 0; r < Math.min(15, aoa.length); r++) {
+      for (let c = 0; c < aoa[r].length; c++) {
+        const val = aoa[r][c];
+        if (val instanceof Date && !isNaN(val)) {
+          return { year: val.getFullYear(), month: val.getMonth() + 1 };
+        }
+        const text = String(val == null ? "" : val);
+        const m = text.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+        if (m) return { year: +m[1], month: +m[2] };
+      }
+    }
+    return null;
+  }
+
+  function findPeriodInWorkbook(workbook) {
+    const resumoName = workbook.SheetNames.find((n) => normalize(n) === "resumo");
+    if (resumoName) {
+      const p = findPeriodInSheet(workbook.Sheets[resumoName]);
+      if (p) return p;
+    }
+    for (const sn of workbook.SheetNames) {
+      if (sn === resumoName) continue;
+      const p = findPeriodInSheet(workbook.Sheets[sn]);
+      if (p) return p;
+    }
+    return null;
+  }
+
+  function stripLabel(v) {
+    return normalize(v).replace(/:+\s*$/, "").trim();
+  }
+
   // ---------- name mapping (Excel first name -> full name) ----------
 
   const MAPPING_STORAGE_KEY = "jornada_nome_mapping_v1";
+  const MIGRATION_STORAGE_KEY = "jornada_migration_v2";
   const DEFAULT_MAPPING = [
-    { key: "Brithany", value: "Brithany Michelle Orozco Lopez" },
-    { key: "NaThan", value: "Nathan Cesar Araujo Prado" },
-    { key: "VERONICA", value: "Veronica Barbosa Lemos" },
-    { key: "AnaPaula", value: "Ana Paula Andrade Bandeira" },
-    { key: "Marina", value: "Marina de Oliveira Magalhães" },
-    { key: "feLipe", value: "Felipe Augusto Batista Martins" },
-    { key: "THAINARA C", value: "Thainara Cristina do Prado Pereira" },
-    { key: "CAROLINE", value: "Caroline Xavier Ribeiro" },
-    { key: "LARA", value: "Lara das Graças Lemos Silva" },
-    { key: "JOAO LUIZ", value: "João Luiz Alves de Souza" }
+    { key: "Brithany", value: "Brithany Michelle Orozco Lopez", hoursPerDay: 8, active: true },
+    { key: "NaThan", value: "Nathan Cesar Araujo Prado", hoursPerDay: 8, active: true },
+    { key: "VERONICA", value: "Veronica Barbosa Lemos", hoursPerDay: 8, active: true },
+    { key: "AnaPaula", value: "Ana Paula Andrade Bandeira", hoursPerDay: 8, active: true },
+    { key: "Marina", value: "Marina de Oliveira Magalhães", hoursPerDay: 8, active: true },
+    { key: "feLipe", value: "Felipe Augusto Batista Martins", hoursPerDay: 4, active: true },
+    { key: "THAINARA C", value: "Thainara Cristina do Prado Pereira", hoursPerDay: 8, active: true },
+    { key: "CAROLINE", value: "Caroline Xavier Ribeiro", hoursPerDay: 8, active: true },
+    { key: "LARA", value: "Lara das Graças Lemos Silva", hoursPerDay: 8, active: true },
+    { key: "JOAO LUIZ", value: "João Luiz Alves de Souza", hoursPerDay: 8, active: true },
+    { key: "JoaoMarcelo", value: "João Marcelo Angeli Barbosa", hoursPerDay: 8, active: true },
+    { key: "Victor", value: "Victor Luiz Gonçalves Pereira", hoursPerDay: 8, active: true },
+    { key: "Camilla", value: "Camilla", hoursPerDay: 8, active: false },
+    { key: "ViNiCiUs", value: "Vinícius", hoursPerDay: 8, active: false }
+  ];
+
+  // Employees who left, or whose daily hours differ from the default 8h
+  // (e.g. an intern doing 4h/day). Applied once to whatever's already saved,
+  // so it doesn't clobber changes a user makes afterward.
+  const MIGRATION_PATCHES = [
+    { key: "Camilla", value: "Camilla", hoursPerDay: 8, active: false },
+    { key: "ViNiCiUs", value: "Vinícius", hoursPerDay: 8, active: false },
+    { key: "feLipe", value: "Felipe Augusto Batista Martins", hoursPerDay: 4, active: true }
+  ];
+
+  // Round 2: two more employees confirmed from the full roster, added after
+  // the v2 migration already ran for existing users — needs its own flag so
+  // it applies once more without re-touching everything else.
+  const MIGRATION_V3_KEY = "jornada_migration_v3";
+  const MIGRATION_V3_PATCHES = [
+    { key: "JoaoMarcelo", value: "João Marcelo Angeli Barbosa", hoursPerDay: 8, active: true },
+    { key: "Victor", value: "Victor Luiz Gonçalves Pereira", hoursPerDay: 8, active: true }
   ];
 
   function nameKey(s) {
@@ -459,108 +576,139 @@
     localStorage.setItem(MAPPING_STORAGE_KEY, JSON.stringify(list));
   }
 
+  function applyMigration(flagKey, patches, list) {
+    if (localStorage.getItem(flagKey)) return list;
+    patches.forEach((patch) => {
+      const idx = list.findIndex((m) => nameKey(m.key) === nameKey(patch.key));
+      if (idx === -1) list.push({ ...patch });
+      else list[idx] = { ...list[idx], ...patch };
+    });
+    localStorage.setItem(flagKey, "1");
+    saveMapping(list);
+    return list;
+  }
+
   let nameMapping = loadMapping();
+  nameMapping = applyMigration(MIGRATION_STORAGE_KEY, MIGRATION_PATCHES, nameMapping);
+  nameMapping = applyMigration(MIGRATION_V3_KEY, MIGRATION_V3_PATCHES, nameMapping);
+
+  function findMappingEntry(rawName) {
+    const k = nameKey(rawName);
+    return nameMapping.find((m) => nameKey(m.key) === k);
+  }
 
   function resolveFullName(rawName) {
-    const k = nameKey(rawName);
-    const entry = nameMapping.find((m) => nameKey(m.key) === k);
+    const entry = findMappingEntry(rawName);
     return entry ? entry.value : rawName;
   }
 
-  // ---------- Goiânia parser (summary report, "Resumo" sheet) ----------
+  function isExcluded(rawName) {
+    const entry = findMappingEntry(rawName);
+    return !!entry && entry.active === false;
+  }
+
+  function getHoursPerDay(rawName) {
+    const entry = findMappingEntry(rawName);
+    const h = entry && entry.hoursPerDay;
+    return typeof h === "number" && h > 0 ? h : 8;
+  }
+
+  // Excludes employees marked inactive and rescales "necessario" for anyone
+  // with a custom daily-hours value (e.g. an intern doing 4h instead of 8h).
+  function applyEmployeeConfig(employees) {
+    return employees
+      .filter((e) => !isExcluded(e.nome))
+      .map((e) => {
+        const perDay = getHoursPerDay(e.nome);
+        return perDay === 8 ? e : { ...e, necessario: e.necessario * (perDay / 8) };
+      });
+  }
+
+  // ---------- Goiânia parser ("Registros" sheet: one 2-row block per employee) ----------
+  //
+  // Layout: a header row with scattered labels ("Nº", "Nome:", "Departamento:")
+  // each followed by its value in the next non-empty cell, then a single data
+  // row right below it where every column is one calendar day, holding that
+  // day's punch times stacked with line breaks inside the cell (e.g.
+  // "08:12\n12:17\n13:33\n17:33"). We don't need to know which column is which
+  // day — we just sum up every day's valid worked hours across the row.
 
   function parseGoiania(workbook) {
-    const sheetName =
-      workbook.SheetNames.find((n) => normalize(n) === "resumo") ||
-      workbook.SheetNames[0];
-    const ws = workbook.Sheets[sheetName];
-    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
-
-    if (!aoa.length) {
-      throw new Error(
-        `A aba "${sheetName}" está vazia. Abas encontradas no arquivo: ${workbook.SheetNames.join(", ")}.`
-      );
-    }
-
-    // find period (mês/ano) among the first rows
-    let period = null;
-    outer: for (let r = 0; r < Math.min(15, aoa.length); r++) {
-      for (let c = 0; c < aoa[r].length; c++) {
-        const val = aoa[r][c];
-        if (val instanceof Date && !isNaN(val)) {
-          period = { year: val.getFullYear(), month: val.getMonth() + 1 };
-          break outer;
-        }
-        const text = String(val == null ? "" : val);
-        const m = text.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-        if (m) {
-          period = { year: +m[1], month: +m[2] };
-          break outer;
-        }
-      }
-    }
+    const period = findPeriodInWorkbook(workbook);
     if (!period) {
       throw new Error(
-        `Não encontrei o período (mês/ano) nas primeiras linhas da planilha de Goiânia (aba "${sheetName}"). ` +
-        `Esperava algo como "2026/06/01 ~ 06/30". Conteúdo encontrado:\n\n${dumpRows(aoa, 10)}`
+        `Não encontrei o período (mês/ano) no arquivo de Goiânia. Esperava algo como "2026/06/01 ~ 06/30" em alguma aba. ` +
+        `Abas encontradas: ${workbook.SheetNames.join(", ")}.`
       );
     }
 
-    // find header row containing "Nome"
-    let headerRow = -1, nomeCol = -1;
-    for (let r = 0; r < Math.min(20, aoa.length); r++) {
-      const idx = findHeaderCol(aoa[r], "nome");
-      if (idx !== -1) { headerRow = r; nomeCol = idx; break; }
-    }
-    if (headerRow === -1) {
+    const sheetName = workbook.SheetNames.find((n) => normalize(n) === "registros");
+    if (!sheetName) {
       throw new Error(
-        `Não encontrei a coluna "Nome" na planilha de Goiânia (aba "${sheetName}"). Conteúdo encontrado:\n\n${dumpRows(aoa, 12)}`
+        `Não encontrei a aba "Registros" no arquivo de Goiânia. Abas encontradas: ${workbook.SheetNames.join(", ")}.`
       );
     }
-
-    const hdr = aoa[headerRow];
-    const departamentoCol = findHeaderCol(hdr, "departamento");
-
-    // "Real" (and other sub-headers like "Necessário") often sit on the row
-    // below "Nome"/"Departamento", under a merged group header (e.g. "Duração
-    // do trabalho"). Look on the header row first, then the row right below it.
-    let realCol = findHeaderCol(hdr, "real");
-    let dataStartRow = headerRow + 1;
-    if (realCol === -1 && aoa[headerRow + 1]) {
-      const subHdr = aoa[headerRow + 1];
-      const subIdx = findHeaderCol(subHdr, "real");
-      if (subIdx !== -1) {
-        realCol = subIdx;
-        dataStartRow = headerRow + 2;
-      }
-    }
-    if (realCol === -1) {
-      throw new Error(
-        `Não encontrei a coluna "Real" (horas trabalhadas) na planilha de Goiânia. ` +
-        `Cabeçalho encontrado na linha ${headerRow + 1}:\n[${hdr.join(" | ")}]\n` +
-        `Linha seguinte (${headerRow + 2}):\n[${(aoa[headerRow + 1] || []).join(" | ")}]`
-      );
+    const ws = workbook.Sheets[sheetName];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+    if (!aoa.length) {
+      throw new Error(`A aba "${sheetName}" está vazia.`);
     }
 
     const requiredHours = businessDayHours(period.year, period.month);
     const employees = [];
-    for (let r = dataStartRow; r < aoa.length; r++) {
+
+    for (let r = 0; r < aoa.length; r++) {
       const row = aoa[r];
-      const nome = row[nomeCol];
-      if (!nome || String(nome).trim() === "") break;
+      const nomeLabelIdx = row.findIndex((v) => stripLabel(v) === "nome");
+      if (nomeLabelIdx === -1) continue;
+
+      let nome = "";
+      for (let c = nomeLabelIdx + 1; c < row.length; c++) {
+        if (row[c] !== "" && row[c] != null) { nome = String(row[c]).trim(); break; }
+      }
+      if (!nome) continue; // label with no value right after it — not a real block
+
+      const deptLabelIdx = row.findIndex((v) => stripLabel(v).indexOf("departam") === 0);
+      let departamento = "";
+      if (deptLabelIdx !== -1) {
+        for (let c = deptLabelIdx + 1; c < row.length; c++) {
+          if (row[c] !== "" && row[c] != null) { departamento = String(row[c]).trim(); break; }
+        }
+      }
+
+      const dataRow = aoa[r + 1] || [];
+      let workedMinutes = 0;
+      let discardedDays = 0;
+      for (let c = 0; c < dataRow.length; c++) {
+        const cell = dataRow[c];
+        if (cell === "" || cell == null) continue;
+        const times = String(cell)
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map(parseTimeCell)
+          .filter((t) => t != null);
+        if (!times.length) continue;
+        const { minutes, valid } = hoursFromPunches(times);
+        if (valid) workedMinutes += minutes;
+        else discardedDays++;
+      }
+
       employees.push({
-        nome: String(nome).trim(),
-        departamento: departamentoCol !== -1 ? String(row[departamentoCol] || "").trim() : "",
-        real: toNumber(row[realCol]),
+        nome,
+        departamento,
+        real: workedMinutes / 60,
         necessario: requiredHours,
         periodos: [period],
-        diasIncompletos: 0
+        diasIncompletos: discardedDays
       });
+
+      r += 1; // the data row was already consumed above
     }
+
     if (!employees.length) {
       throw new Error(
-        `Nenhum funcionário encontrado na planilha de Goiânia (a linha de dados ${dataStartRow + 1} veio em branco na coluna "Nome"). ` +
-        `Cabeçalho na linha ${headerRow + 1}:\n[${hdr.join(" | ")}]\nLinha ${dataStartRow + 1}: [${(aoa[dataStartRow] || []).join(" | ")}]`
+        `Não encontrei nenhum funcionário (rótulo "Nome:") na aba "${sheetName}". Conteúdo encontrado:\n\n${dumpRows(aoa, 15)}`
       );
     }
     return employees;
@@ -624,23 +772,18 @@
 
       const dateKey = `${dateInfo.year}-${dateInfo.month}-${dateInfo.day}`;
       emp.months.add(`${dateInfo.year}-${dateInfo.month}`);
-      if (!emp.days.has(dateKey)) {
-        emp.days.set(dateKey, { min: timeMinutes, max: timeMinutes, count: 1 });
-      } else {
-        const d = emp.days.get(dateKey);
-        d.min = Math.min(d.min, timeMinutes);
-        d.max = Math.max(d.max, timeMinutes);
-        d.count++;
-      }
+      if (!emp.days.has(dateKey)) emp.days.set(dateKey, []);
+      emp.days.get(dateKey).push(timeMinutes);
     }
 
     const result = [];
     for (const emp of employees.values()) {
       let realMinutes = 0;
       let incompleteDays = 0;
-      for (const d of emp.days.values()) {
-        if (d.count < 2) { incompleteDays++; continue; }
-        realMinutes += (d.max - d.min);
+      for (const times of emp.days.values()) {
+        const { minutes, valid } = hoursFromPunches(times);
+        if (valid) realMinutes += minutes;
+        else incompleteDays++;
       }
       let requiredHours = 0;
       const periodos = [];
@@ -683,7 +826,7 @@
       : `Faltam ${formatHours(-diff)} para bater a meta`;
     const periodo = (e.periodos || []).map((p) => `${String(p.month).padStart(2, "0")}/${p.year}`).join(", ");
     const incompleteNote = e.diasIncompletos
-      ? `<div class="note">⚠ ${e.diasIncompletos} dia(s) com apenas 1 batida (ignorado no cálculo)</div>`
+      ? `<div class="note">⚠ ${e.diasIncompletos} dia(s) sem 2 ou 4 batidas (ignorado no cálculo)</div>`
       : "";
     const fullName = resolveFullName(e.nome);
     const nameCell = fullName !== e.nome
@@ -755,18 +898,21 @@
 
   // ---------- mapping table UI ----------
 
+  const rawEmployees = {};
   const lastEmployees = {};
 
   function renderMappingTable() {
     const tbody = document.getElementById("mapping-tbody");
     if (!nameMapping.length) {
-      tbody.innerHTML = `<tr><td colspan="3" class="mapping-empty">Nenhum funcionário cadastrado ainda.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="mapping-empty">Nenhum funcionário cadastrado ainda.</td></tr>`;
       return;
     }
     tbody.innerHTML = nameMapping
       .map((m, i) => `<tr>
         <td>${escapeHtml(m.key)}</td>
         <td>${escapeHtml(m.value)}</td>
+        <td><input type="number" class="mapping-hours" data-idx="${i}" min="1" max="24" step="0.5" value="${m.hoursPerDay != null ? m.hoursPerDay : 8}" /></td>
+        <td><input type="checkbox" class="mapping-active" data-idx="${i}" ${m.active === false ? "" : "checked"} title="Incluir no relatório" /></td>
         <td><button class="mapping-remove" type="button" data-idx="${i}" title="Remover">✕</button></td>
       </tr>`)
       .join("");
@@ -778,38 +924,131 @@
         rerenderCachedResults();
       });
     });
+    tbody.querySelectorAll(".mapping-hours").forEach((inp) => {
+      inp.addEventListener("change", () => {
+        const idx = Number(inp.dataset.idx);
+        const v = parseFloat(String(inp.value).replace(",", "."));
+        nameMapping[idx].hoursPerDay = !isNaN(v) && v > 0 ? v : 8;
+        saveMapping(nameMapping);
+        rerenderCachedResults();
+      });
+    });
+    tbody.querySelectorAll(".mapping-active").forEach((chk) => {
+      chk.addEventListener("change", () => {
+        const idx = Number(chk.dataset.idx);
+        nameMapping[idx].active = chk.checked;
+        saveMapping(nameMapping);
+        rerenderCachedResults();
+      });
+    });
   }
 
   function rerenderCachedResults() {
-    Object.keys(lastEmployees).forEach((unit) => renderResults(unit, lastEmployees[unit]));
+    Object.keys(rawEmployees).forEach((unit) => {
+      lastEmployees[unit] = applyEmployeeConfig(rawEmployees[unit]);
+      renderResults(unit, lastEmployees[unit]);
+    });
   }
 
   function setupMappingForm() {
     const keyInput = document.getElementById("map-key");
     const valueInput = document.getElementById("map-value");
+    const hoursInput = document.getElementById("map-hours");
     const addBtn = document.getElementById("map-add-btn");
 
     function addEntry() {
       const key = keyInput.value.trim();
       const value = valueInput.value.trim();
       if (!key || !value) return;
+      const h = parseFloat(String(hoursInput.value).replace(",", "."));
+      const hoursPerDay = !isNaN(h) && h > 0 ? h : 8;
       const existing = nameMapping.findIndex((m) => nameKey(m.key) === nameKey(key));
-      if (existing !== -1) nameMapping[existing] = { key, value };
-      else nameMapping.push({ key, value });
+      if (existing !== -1) {
+        nameMapping[existing] = { ...nameMapping[existing], key, value, hoursPerDay };
+      } else {
+        nameMapping.push({ key, value, hoursPerDay, active: true });
+      }
       saveMapping(nameMapping);
       keyInput.value = "";
       valueInput.value = "";
+      hoursInput.value = "8";
       keyInput.focus();
       renderMappingTable();
       rerenderCachedResults();
     }
 
     addBtn.addEventListener("click", addEntry);
-    [keyInput, valueInput].forEach((input) =>
+    [keyInput, valueInput, hoursInput].forEach((input) =>
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") addEntry();
       })
     );
+  }
+
+  // ---------- export to a single Excel report ----------
+
+  const EXPORT_UNITS = [["goiania", "Goiânia"], ["mararosa", "Mara Rosa"]];
+
+  function situacaoText(e) {
+    const diff = e.real - e.necessario;
+    if (diff >= -EPS) {
+      return diff > EPS ? `Meta batida — crédito de ${formatHours(diff)}` : "Meta batida exatamente";
+    }
+    return `Faltam ${formatHours(-diff)}`;
+  }
+
+  function buildExportRows() {
+    const rows = [[
+      "Unidade", "Nome", "Departamento", "Período",
+      "Necessário (h)", "Trabalhado (h)", "Diferença (h)", "Situação"
+    ]];
+    EXPORT_UNITS.forEach(([unit, label]) => {
+      (lastEmployees[unit] || []).forEach((e) => {
+        const periodo = (e.periodos || []).map((p) => `${String(p.month).padStart(2, "0")}/${p.year}`).join(", ");
+        rows.push([
+          label,
+          resolveFullName(e.nome),
+          e.departamento || "",
+          periodo,
+          Number(e.necessario.toFixed(2)),
+          Number(e.real.toFixed(2)),
+          Number((e.real - e.necessario).toFixed(2)),
+          situacaoText(e)
+        ]);
+      });
+    });
+    return rows;
+  }
+
+  function setupExport() {
+    const btn = document.getElementById("export-btn");
+    const statusEl = document.getElementById("export-status");
+
+    btn.addEventListener("click", () => {
+      try {
+        const rows = buildExportRows();
+        if (rows.length <= 1) {
+          statusEl.textContent = "Envie ao menos um arquivo antes de exportar.";
+          statusEl.className = "export-status error";
+          return;
+        }
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws["!cols"] = [
+          { wch: 10 }, { wch: 30 }, { wch: 16 }, { wch: 12 },
+          { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 42 }
+        ];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Relatório");
+        const now = new Date();
+        const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+        XLSX.writeFile(wb, `relatorio_jornada_${stamp}.xlsx`);
+        statusEl.textContent = "Arquivo exportado.";
+        statusEl.className = "export-status ok";
+      } catch (err) {
+        statusEl.textContent = err && err.message ? err.message : "Erro ao exportar o relatório.";
+        statusEl.className = "export-status error";
+      }
+    });
   }
 
   // ---------- upload wiring ----------
@@ -842,9 +1081,11 @@
           const data = new Uint8Array(evt.target.result);
           const workbook = XLSX.read(data, { type: "array", cellDates: true });
           const employees = parseFn(workbook);
-          lastEmployees[unit] = employees;
-          renderResults(unit, employees);
-          setOk(`${employees.length} funcionário(s) processado(s).`);
+          rawEmployees[unit] = employees;
+          const configured = applyEmployeeConfig(employees);
+          lastEmployees[unit] = configured;
+          renderResults(unit, configured);
+          setOk(`${configured.length} funcionário(s) processado(s)${configured.length !== employees.length ? ` (${employees.length - configured.length} ignorado(s))` : ""}.`);
         } catch (err) {
           setError(err && err.message ? err.message : "Erro ao processar o arquivo.");
         }
@@ -874,6 +1115,7 @@
 
   renderMappingTable();
   setupMappingForm();
+  setupExport();
   setupUploadCard("goiania", parseGoiania);
   setupUploadCard("mararosa", parseMaraRosa);
 })();
